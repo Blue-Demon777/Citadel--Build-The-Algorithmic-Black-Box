@@ -1,117 +1,129 @@
-# Day 6 — Scale-Up, Data Collection & Order Flow Visualization
+# Day 8 — Gymnasium Trading Environment (RL Interface)
 
 ## Objective
 
-Run a multi-agent market simulation and instrument it for **full observability** in order to study emergent market microstructure dynamics.
+The goal of **Day 8** is to wrap the previously built limit-order-book market simulator into a **Gymnasium-compatible reinforcement learning environment**.
 
-This day focuses on **observation, not optimization**.  
-All agent policies are frozen, and no learning occurs during the simulation.
+This day answers a critical question:
 
----
+**Can the market simulation be exposed as a stable, deterministic RL environment suitable for PPO training?**
 
-## Motivation
-
-Single-agent environments are controlled systems.
-
-Multi-agent environments are **complex adaptive systems** where:
-
-- Order flow interacts with liquidity
-- Liquidity provision affects volatility
-- Agent behavior creates feedback loops
-
-The goal of Day 6 is to observe these dynamics under realistic market mechanics.
+This is an infrastructure day — no learning yet, only correctness and interface design.
 
 ---
 
-## Simulation Setup
+## What Was Built
 
-### Agent Population
+A custom `TradingEnv` class implementing the **Gymnasium API**, providing:
 
-The simulation includes heterogeneous agents:
+- Discrete action space
+- Continuous observation space
+- Risk-aware reward function
+- Deterministic resets and transitions
+- Compatibility with Stable-Baselines3
 
-- **1 PPO Agent**
-  - Uses a frozen policy trained in Day 5 (`ppo_day5.zip`)
-  - Acts deterministically (no exploration)
-  - Inventory and cash constrained
-
-- **Noise Traders**
-  - Randomized buy/sell behavior
-  - Bounded inventory
-  - Inject stochastic order flow
-
-- **Market Makers**
-  - Continuously quote bid/ask prices around mid-price
-  - Provide liquidity and earn spread
-  - Inventory constrained
-
-- **Momentum Agent**
-  - Trades based on recent price movement
-  - Adds directional pressure to the market
-
-No individual agent is “intelligent” in isolation.  
-Market structure emerges from their interaction.
+This environment internally embeds:
+- Order book
+- Event-driven market engine
+- Inventory & cash accounting
+- Reward shaping with drawdown penalty
 
 ---
 
-## Simulation Parameters
+## Environment Specification
 
-- Total timesteps: **5,000**
-- Tick size: fixed
-- Lot size: fixed
-- Inventory bounds: enforced for all agents
-- Learning: **disabled**
-- Policy updates: **none**
+### Action Space
 
-This is a **measurement run**, not a training run.
+
+| Action | Meaning |
+|------|--------|
+| 0 | Hold (no action) |
+| 1 | Market Buy (1 unit) |
+| 2 | Market Sell (1 unit) |
 
 ---
 
-## How to Run (Day 6)
+### Observation Space
 
-From the Day 6 directory:
+A fixed-length normalized vector:
+
+[ bid_prices,
+bid_sizes,
+ask_prices,
+ask_sizes,
+inventory,
+cash ]
+
+
+- Order book depth: configurable (`book_depth`)
+- Prices normalized relative to mid-price
+- Inventory and cash normalized to bounds
+
+
+---
+
+## Reward Function
+
+The reward is **risk-aware**, not just PnL-based:
+
+reward =
+Δ(portfolio_value)
+− transaction_cost
+− λ × drawdown
+
+Where:
+- `portfolio_value = cash + inventory × mid_price`
+- Drawdown is measured from peak equity
+- λ (`lambda_risk`) controls risk aversion
+
+This discourages:
+- Over-trading
+- Large inventory accumulation
+- Deep equity drawdowns
+
+---
+
+## Episode Termination Conditions
+
+An episode ends when **any** of the following occurs:
+
+- Maximum number of steps reached
+- Inventory exceeds allowed bounds
+- Cash balance is depleted
+
+Both `terminated` and `truncated` flags are handled explicitly.
+
+---
+
+## Determinism Guarantees
+
+- Explicit random seeding
+- Reproducible resets
+- Identical trajectories for identical action sequences
+
+A determinism test script verifies:
+- Identical observations
+- Identical termination flags
+- No hidden stochasticity
+
+---
+
+## Files Introduced (Day 8)
+
+Day8/
+├── TradingEnv.py # Gymnasium-compatible trading environment
+├── test_determinism.py # Determinism verification script
+├── README.md # Day-8 documentation
+
+
+---
+
+## How to Run
+
+### Determinism Test
+
+From the Day 8 directory:
 
 ```bash
-python run_simulation.py
+python test_determinism.py
 ```
-### This script:
-
-- Loads the frozen PPO policy
-- Initializes the multi-agent population
-- Runs the event-driven market simulation
-- Logs trades, order book snapshots, and inventory
-- Generates a consolidated market report (PDF)
-
-## Date Logging & Observability
-The simulation records full market microstructure data, including :
-### Trade Data :
-- Trade price
-- Trade quantity
-- Buyer and seller identifiers
-### Orderbook Data :
-
-- Best bid and ask (L1)
-- Bid–ask spread
-- Mid-price
-- Depth snapshots (L2)
-### Agent State:
-- Inventory over time 
-- Agent participation in Trades
-
-All Data is persisted and can be reconstructed offline for analysis
-
-## Visualization 
-An orderbook heatmap and market summary visualizations are generated to make liquidity and price dynamics visible 
-### Expected Characterstics
-- Liquidity walls formed by market makers
-- Continuos Price discovery through interaction with resting orders 
-- Assymetry between bid-side and ask-side liquidity under pressure 
-About price jumps without liquidity interaction would indicate a bug; none were observed 
-
-
-## Results and Observations 
-- Liquidity concentrated primarily around market maker quotes
-- Price moved through liquidity rather than teleporting
-- The PPO agent traded selectively and avoided extreme inventory accumulation
-- Noise traders contributed stochastic flow without destabilizing the market
-
-One anomaly observed was occasional thinning of liquidity during clustered agent arrivals, which may warrant further investigation.
