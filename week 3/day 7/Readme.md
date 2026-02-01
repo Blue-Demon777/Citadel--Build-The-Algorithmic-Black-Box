@@ -1,119 +1,232 @@
-# Day 6 — Scale-Up, Data Collection & Order Flow Visualization
+# Day 7 — Market Agents & Strategic Behavior
 
 ## Objective
 
-Run a multi-agent market simulation and instrument it for **full observability** in order to study emergent market microstructure dynamics.
+The goal of **Day 7** is to introduce **agent-based behavior** into the event-driven market simulation.
 
-This day focuses on **observation, not optimization**.  
-All agent policies are frozen, and no learning occurs during the simulation.
+This day answers the question:
 
----
+**Can different types of trading agents interact realistically inside the same limit order book?**
 
-## Motivation
-
-Single-agent environments are controlled systems.
-
-Multi-agent environments are **complex adaptive systems** where:
-
-- Order flow interacts with liquidity
-- Liquidity provision affects volatility
-- Agent behavior creates feedback loops
-
-The goal of Day 6 is to observe these dynamics under realistic market mechanics.
+The focus is on **strategy design and interaction**, not learning or optimization.
 
 ---
 
-## Simulation Setup
+## What Was Built
 
-### Agent Population
+A modular agent framework where multiple trader archetypes operate simultaneously in the market.
 
-The simulation includes heterogeneous agents:
+Each agent:
+- Observes the current market state
+- Decides an action (market / limit / cancel)
+- Interacts asynchronously via the event engine
+- Maintains its own inventory and cash state
 
-- **1 PPO Agent**
-  - Uses a frozen policy trained in Day 5 (`ppo_day5.zip`)
-  - Acts deterministically (no exploration)
-  - Inventory and cash constrained
-
-- **Noise Traders**
-  - Randomized buy/sell behavior
-  - Bounded inventory
-  - Inject stochastic order flow
-
-- **Market Makers**
-  - Continuously quote bid/ask prices around mid-price
-  - Provide liquidity and earn spread
-  - Inventory constrained
-
-- **Momentum Agent**
-  - Trades based on recent price movement
-  - Adds directional pressure to the market
-
-No individual agent is “intelligent” in isolation.  
-Market structure emerges from their interaction.
+This establishes **market ecology**, a prerequisite for RL.
 
 ---
 
-## Simulation Parameters
+## Agent Architecture
 
-- Total timesteps: **5,000**
-- Tick size: fixed
-- Lot size: fixed
-- Inventory bounds: enforced for all agents
-- Learning: **disabled**
-- Policy updates: **none**
+All agents inherit from a common abstract base:
 
-This is a **measurement run**, not a training run.
+Agent
+├── RandomAgent
+├── MarketMakerAgent
+├── NoiseTraderAgent
+└── MomentumAgent
 
----
 
-## How to Run (Day 6)
+Each agent implements:
 
-From the Day 6 directory:
-
-```bash
-python run_simulation.py
+```python
+get_action(market_state)
+on_trade(trade, side)
 ```
-### This script:
+**Agent Types**
+**RandomAgent**
 
-- Loads the frozen PPO policy
-- Initializes the multi-agent population
-- Runs the event-driven market simulation
-- Logs trades, order book snapshots, and inventory
-- Generates a consolidated market report (PDF)
+A baseline, non-strategic trader.
 
-## Date Logging & Observability
-The simulation records full market microstructure data, including :
-### Trade Data :
-- Trade price
-- Trade quantity
-- Buyer and seller identifiers
-### Orderbook Data :
+Behavior:
+- Random BUY / SELL decisions
+- Random order type:
+-- Market orders
+-- Limit orders near mid-price
+- Random quantity
 
-- Best bid and ask (L1)
-- Bid–ask spread
-- Mid-price
-- Depth snapshots (L2)
-### Agent State:
-- Inventory over time 
-- Agent participation in Trades
+Purpose:
+- Provide background liquidity
+- Serve as a control agent
 
-All Data is persisted and can be reconstructed offline for analysis
+### NoiseTraderAgent
 
-## Visualization 
-An orderbook heatmap and market summary visualizations are generated to make liquidity and price dynamics visible 
-### Expected Characterstics
-- Liquidity walls formed by market makers
-- Continuos Price discovery through interaction with resting orders 
-- Assymetry between bid-side and ask-side liquidity under pressure 
-About price jumps without liquidity interaction would indicate a bug; none were observed 
+A zero-intelligence trader anchored to an external **fair value process**.
+
+#### Behavior
+- Random BUY / SELL decisions
+- Quantity bounded by available cash and inventory
+- **70% market orders**
+- **30% aggressive limit orders** near fair value
+
+#### Constraints
+- Cannot buy beyond available cash
+- Cannot sell beyond available inventory
+
+#### Purpose
+- Inject stochastic order flow
+- Simulate uninformed or retail market participants
+- Provide liquidity and randomness to the market
+
+---
+
+### MarketMakerAgent
+
+A liquidity-providing agent responsible for tightening spreads and absorbing order flow.
+
+#### Behavior
+- Simultaneously posts bid and ask limit orders
+- Quotes centered around mid-price
+- Applies **inventory skew** to encourage mean reversion
+- Cancels and replaces all active quotes synchronously
+
+#### Key Mechanisms
+- Base spread parameter
+- Inventory-sensitive quote adjustment
+- Maximum inventory constraint
+
+#### Purpose
+- Reduce bid-ask spread
+- Maintain market stability
+- Earn profit from spread capture
+
+---
+
+### MomentumAgent
+
+A trend-following trader based on price momentum.
+
+#### Behavior
+- Maintains a rolling window of mid-prices
+- Computes Simple Moving Average (SMA)
+- BUY if price > SMA
+- SELL if price < SMA
+- Uses aggressive market orders
+
+#### Constraints
+- Budget-limited
+- Inventory-limited
+
+#### Purpose
+- Introduce directional pressure
+- Stress-test market maker inventory management
+- Create non-stationary price dynamics
+
+---
+
+## Market State Provided to Agents
+
+Each agent receives a snapshot of the current market state:
+
+{
+best_bid,
+best_ask,
+mid,
+l2_snapshot
+}
 
 
-## Results and Observations 
-- Liquidity concentrated primarily around market maker quotes
-- Price moved through liquidity rather than teleporting
-- The PPO agent traded selectively and avoided extreme inventory accumulation
-- Noise traders contributed stochastic flow without destabilizing the market
+This ensures:
+- No access to future information
+- No privileged state
+- All agents operate under identical information constraints
 
-One anomaly observed was occasional thinning of liquidity during clustered agent arrivals, which may warrant further investigation.
+---
 
-We got the value of **Kurtosis** = 5.98 , which is greater than the Bench mark (3)
+## Event-Driven Interaction
+
+Agents interact with the market via scheduled events:
+
+- `AgentArrivalEvent`
+- `OrderSubmissionEvent`
+- `SnapshotEvent`
+- `MarketCloseEvent`
+
+All interactions are:
+- Time-stamped
+- Latency-aware
+- Processed asynchronously
+
+This preserves causality and prevents unrealistic execution assumptions.
+
+---
+
+## Files Introduced (Day 7)
+
+Day7/
+├── agents.py # Agent definitions and strategies
+├── actions.py # Market actions (limit, market, cancel)
+├── events.py # Event-driven agent interaction
+├── README.md # Day-7 documentation
+
+
+---
+
+## Design Constraints Enforced
+
+- Agents never bypass the order book
+- All state changes occur via executed trades
+- Cash and inventory are conserved
+- No agent sees future prices
+
+Any violation indicates a structural error.
+
+---
+
+## Pass / Fail Criteria
+
+### PASS
+- Multiple agent types coexist without runtime errors
+- Market maker tightens spreads
+- Noise traders generate random order flow
+- Momentum traders introduce directional pressure
+- Inventory and cash remain bounded
+
+### FAIL
+- Negative cash balances
+- Inventory explosions
+- No trades occurring
+- Agents bypassing the event system
+
+Failures must be fixed before reinforcement learning integration.
+
+---
+
+## Why This Matters
+
+Without heterogeneous agents:
+- Market dynamics are trivial
+- Reinforcement learning agents overfit
+- Learning signals are misleading
+
+This agent ecosystem creates:
+- Competition
+- Noise
+- Adversarial pressure
+
+These conditions are required for meaningful PPO training.
+
+---
+
+## Verdict
+
+**Day 7 successfully establishes realistic market behavior.**
+
+The simulator now supports:
+- Competing trading strategies
+- Inventory-aware decision making
+- Directional and stochastic order flow
+
+This completes the **behavioral layer** of the system.
+
+Day 8 builds on this by exposing the market as a Gymnasium-compatible RL environment.
